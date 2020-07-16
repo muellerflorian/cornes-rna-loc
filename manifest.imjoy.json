@@ -1,0 +1,35 @@
+{
+ "name": "ImJoy Repository",
+ "description": "ImJoy plugin repository.",
+ "uri_root": "",
+ "version": "0.2.0",
+ "plugins": [
+  {
+   "name": "RNA-Axes-Enrichment",
+   "type": "native-python",
+   "version": "0.0.1",
+   "description": "Calculate expression levels around annotated axes.",
+   "tags": "",
+   "ui": [
+    "<span style='font-weight: 550; color:#666362'>Path ANALYSIS</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
+    "<span style='font-weight: 550; color:#666362'>Image size</span>: {id: 'image_size', type: 'string', placeholder: '1024,1024'}",
+    "<span style='font-weight: 550; color:#666362'>MAX distance</span>: {id: 'dist_max', type: 'number', placeholder: 100}",
+    "<span style='font-weight: 550; color:#666362'>N avg</span>: {id: 'n_avg', type: 'number', placeholder: 20}"
+   ],
+   "cover": "",
+   "inputs": null,
+   "outputs": null,
+   "flags": [],
+   "icon": "extension",
+   "api_version": "0.1.7",
+   "env": "",
+   "permissions": [],
+   "requirements": [
+    "pip: matplotlib scikit-image numpy pandas seaborn"
+   ],
+   "dependencies": [],
+   "uri": "imjoy-plugins\\RNA-Axes-Enrichment.imjoy.html"
+  }
+ ],
+ "collections": []
+}

@@ -1,0 +1,240 @@
+﻿<docs lang="markdown">
+[TODO: write documentation for this plugin.]
+</docs>
+
+<config lang="json">
+{
+  "name": "RNA-Axes-Enrichment",
+  "type": "native-python",
+  "version": "0.0.1",
+  "description": "Calculate expression levels around annotated axes.",
+  "tags": "",
+  "ui": [
+        "<span style='font-weight: 550; color:#666362'>Path ANALYSIS</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
+        "<span style='font-weight: 550; color:#666362'>Image size</span>: {id: 'image_size', type: 'string', placeholder: '1024,1024'}",
+        "<span style='font-weight: 550; color:#666362'>MAX distance</span>: {id: 'dist_max', type: 'number', placeholder: 100}",
+        "<span style='font-weight: 550; color:#666362'>N avg</span>: {id: 'n_avg', type: 'number', placeholder: 20}"
+        ],
+  "cover": "",
+  "inputs": null,
+  "outputs": null,
+  "flags": [],
+  "icon": "extension",
+  "api_version": "0.1.7",
+  "env": "",
+  "permissions": [],
+  "requirements": ["pip: matplotlib scikit-image numpy pandas seaborn"],
+  "dependencies": []
+}
+</config>
+
+<script lang="python">
+from imjoy import api
+
+import asyncio
+import sys
+
+import os
+
+import json
+from pathlib import Path
+import numpy as np
+from scipy import ndimage
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+from skimage.draw import polygon_perimeter
+from skimage import draw
+
+
+if sys.platform == "darwin":
+    import matplotlib
+    matplotlib.use('PS')
+
+class ImJoyPlugin():
+    def setup(self):
+        api.log('RNA-Axes-Enrichment plugin initialized')
+
+    async def run(self, ctx):
+
+        # >>> CHECK INPUT PARAMETERS
+        api.log(ctx.config)
+
+        path_base_str = ctx.config.path_base
+        image_size_str = ctx.config.image_size
+        dist_max = ctx.config.dist_max
+        n_avg = ctx.config.n_avg
+
+        # Path containing data, and to save results
+        if path_base_str == 'paste-path-to-data':
+            api.alert('Path containing data to be processed has to be specified.')
+            return
+
+        path_base = Path(path_base_str)
+
+        # Check new size
+        if image_size_str.count(',') == 1:
+            image_size = tuple(int(x) for x in image_size_str.split(','))
+        else:
+            api.alert('String to define new size has to contain \",\" to separate the new dimensions in XY.')
+            return
+
+        # >>> PROCESS FOLDERS
+
+        # Different folders
+        path_json = path_base / 'axes_enrichment' / 'annotations'
+        path_spots = path_base / 'spot_detection'
+
+        path_save = path_base / 'axes_enrichment' / 'results'
+        if not path_save.is_dir():
+            path_save.mkdir(parents=True)
+
+        # Loop over all spot detection results
+        for f_spots in path_spots.glob('*__spots.csv'):
+
+            api.showStatus(f'>>> Processing spot detection file {f_spots}. More details in log.')
+            name_spots = f_spots.name
+            
+            # Annnotation file
+            name_json = name_spots.replace('__spots.csv','.json')
+            name_json_full = (path_json / name_json).resolve()
+
+            if not name_json_full.is_file():
+                api.log(f'Annotation does not exist: {name_json_full}')
+                continue
+
+            with open(name_json_full, encoding='utf-8-sig') as fh:
+                data_json = json.load(fh)
+
+                # Overwrite default file size if bounding box is present
+                if 'bbox' in data_json:
+                    image_size = (int(data_json['bbox'][2]-data_json['bbox'][0]+1),
+                                        int(data_json['bbox'][3]-data_json['bbox'][1]+1))
+                else:
+                    api.log('Image size not provided in geojson file.')
+
+                # Loop over list and create simple dictionary & get size of annotations
+                n_features = len(data_json['features'])
+                if n_features != 1:
+                    api.log(f'Annotation file CAN ONLY contain 1 annotation, not {n_features}.')
+                    continue
+                
+                annot_type = data_json['features'][0]['geometry']['type']
+                if annot_type not in ['LineString']:
+                    api.log(f'Annotation type {annot_type} not supported .')
+                    continue            
+                
+                line = np.squeeze(np.asarray(data_json['features'][0]['geometry']['coordinates'])).astype('int')
+                
+
+                # >>>>> Process annotation
+
+                # >> Loop over polygon coordinates and create closed line
+
+                rr_all =  np.empty([0], dtype=int)
+                cc_all = np.empty([0], dtype=int)
+                img_mask = np.zeros(image_size)
+
+                for i in range(line.shape[0]-1):
+                    r0 = line[i][1]
+                    c0 = line[i][0]
+                    r1 = line[i+1][1]
+                    c1 = line[i+1][0]
+
+                    rr, cc = draw.line(r0, c0, r1, c1)
+                    rr_all = np.append(rr_all,rr)
+                    cc_all = np.append(cc_all,cc)
+
+                # >> Remove duplicate entries   
+                line_sampled = np.column_stack((cc_all,rr_all)) 
+                _,idx = np.unique(line_sampled, axis=0, return_index=True)
+                line_sampled = line_sampled[np.sort(idx)]
+
+                img_mask[rr_all, cc_all] = 1
+                edt, inds = ndimage.distance_transform_edt(np.logical_not(img_mask), return_indices=True)
+
+                # >> Distance along the line
+                d = np.diff(line_sampled, axis=0)
+                segdists = np.sqrt((d ** 2).sum(axis=1))
+
+                dist_orig = np.cumsum(segdists)
+                dist_orig = np.append(0,dist_orig)
+
+                # >> Set 0 to turning point
+                ind0 = np.argmin(line_sampled[:,0])
+                dist_orig = dist_orig - dist_orig[ind0]
+
+                # >> Set min to upper right corner
+                y_start = line_sampled[0,1]
+                y_end = line_sampled[-1,1]
+                if y_end < y_start:
+                    dist_orig = -1*dist_orig
+
+
+                # >>>>  Read spot detection file
+                spots = pd.read_csv(f_spots, sep=',').to_numpy()
+
+                #  >> Get index of closest pixel on the line 
+                edt_spots = edt[spots[:,1], spots[:,2]]
+                ind_spots_keep = edt_spots <= dist_max
+
+                inds_spots_ax0 = inds[0,spots[:,1], spots[:,2]]
+                inds_spots_ax1 = inds[1,spots[:,1], spots[:,2]]
+                inds_spots = np.column_stack((inds_spots_ax1,inds_spots_ax0))
+
+                inds_spots = inds_spots[ind_spots_keep,:]
+
+                unique_rows, counters = np.unique(inds_spots, axis=0, return_counts=True)
+
+                # >>>>> Combine results in data-frame
+                df_line = pd.DataFrame(data=line_sampled,columns=["ax1", "ax2"])
+                df_line['dist_orig'] = dist_orig
+                df_spots = pd.DataFrame(data=unique_rows,columns=["ax1", "ax2"])
+                df_spots['n_rna'] = counters
+
+                # >> Merge the data frames & save
+                new_df = pd.merge(df_line, df_spots,  how='left', left_on=['ax1','ax2'], right_on = ['ax1','ax2'])
+                new_df["n_rna"] = new_df["n_rna"].fillna(0)
+                new_df['n_rna_movavg'] = new_df["n_rna"].rolling(window=n_avg).mean()
+
+                name_save = Path(str(name_json_full).replace('.json','__axes_enrich.csv'), index=False)
+
+                name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich.csv')
+                new_df.to_csv(name_save, index=False)
+
+                # >>>  Plot results
+
+                fig, ax = plt.subplots(2, 2)
+                fig.set_size_inches((10, 10))
+
+                ax[0][0].imshow(edt,cmap="hot")
+                ax[0][0].get_xaxis().set_visible(False)
+                ax[0][0].get_yaxis().set_visible(False)
+                ax[0][0].set_title('Axes and distance from axes')
+                ax[0][0].plot(line[:,0], line[:,1], color='b')
+
+                ax[0][1].plot(line[:,0], line[:,1], color='b')
+                ax[0][1].set_title('Spots (green-kept, red-removed)')
+                ax[0][1].scatter(spots[ind_spots_keep,2], spots[ind_spots_keep,1], color='g', s=1)
+                ax[0][1].scatter(spots[np.logical_not(ind_spots_keep),2], spots[np.logical_not(ind_spots_keep),1], color='r', s=1)
+                ax[0][1].invert_yaxis()
+                ax[0][1].set_aspect('equal', 'box')
+
+                ax[1][0].hist(edt_spots, 50, density=True, facecolor='g', alpha=0.75)
+                ax[1][0].set_title('Hist of distance from axis')
+                ax[1][0].set_ylabel('Frequency')
+                ax[1][0].set_xlabel('Distance [pix]')
+
+                sns.lineplot(x="dist_orig", y="n_rna", data=new_df,ax=ax[1][1])
+                sns.lineplot(x="dist_orig", y="n_rna_movavg", data=new_df,ax=ax[1][1])
+
+                plt.tight_layout()
+
+                name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich.png')
+                plt.savefig(name_save,dpi=300)
+                plt.close()
+
+
+
+api.export(ImJoyPlugin())
+</script>
