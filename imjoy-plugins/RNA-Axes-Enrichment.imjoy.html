@@ -6,14 +6,14 @@
 {
   "name": "RNA-Axes-Enrichment",
   "type": "native-python",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Calculate expression levels around annotated axes.",
   "tags": "",
   "ui": [
         "<span style='font-weight: 550; color:#666362'>Path ANALYSIS</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
         "<span style='font-weight: 550; color:#666362'>Image size</span>: {id: 'image_size', type: 'string', placeholder: '1024,1024'}",
         "<span style='font-weight: 550; color:#666362'>MAX distance</span>: {id: 'dist_max', type: 'number', placeholder: 100}",
-        "<span style='font-weight: 550; color:#666362'>N avg</span>: {id: 'n_avg', type: 'number', placeholder: 20}"
+        "<span style='font-weight: 550; color:#666362'>N bin</span>: {id: 'bin_step', type: 'number', placeholder: 20}"
         ],
   "cover": "",
   "inputs": null,
@@ -63,7 +63,7 @@ class ImJoyPlugin():
         path_base_str = ctx.config.path_base
         image_size_str = ctx.config.image_size
         dist_max = ctx.config.dist_max
-        n_avg = ctx.config.n_avg
+        bin_step = ctx.config.bin_step
 
         # Path containing data, and to save results
         if path_base_str == 'paste-path-to-data':
@@ -193,14 +193,28 @@ class ImJoyPlugin():
                 df_spots['n_rna'] = counters
 
                 # >> Merge the data frames & save
-                new_df = pd.merge(df_line, df_spots,  how='left', left_on=['ax1','ax2'], right_on = ['ax1','ax2'])
-                new_df["n_rna"] = new_df["n_rna"].fillna(0)
-                new_df['n_rna_movavg'] = new_df["n_rna"].rolling(window=n_avg).mean()
-
-                name_save = Path(str(name_json_full).replace('.json','__axes_enrich.csv'), index=False)
-
+                df_results = pd.merge(df_line, df_spots,  how='left', left_on=['ax1','ax2'], right_on = ['ax1','ax2'])
+                df_results["n_rna"] = df_results["n_rna"].fillna(0)
+ 
                 name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich.csv')
-                new_df.to_csv(name_save, index=False)
+                df_results.to_csv(name_save, index=False)
+
+                # >>>> Binning of data
+                bins_neg = np.sort(-np.arange(bin_step, -dist_orig.min() , bin_step, dtype='int16'))
+                bins_pos = np.arange(0, dist_orig.max(), bin_step, dtype='int16')
+                dist_bin = np.concatenate((bins_neg, bins_pos), axis=0)
+
+                # Determine to which bin data-points belong
+                digitized = np.digitize(df_results['dist_orig'], dist_bin)
+
+                # Sum RNA counts for each bin
+                n_rna_bin = [df_results['n_rna'][digitized == i].sum() for i in range(1, len(dist_bin))]
+
+                df_bin = pd.DataFrame({'dist_bin': dist_bin[0:-1],
+                                    'n_rna_bin': n_rna_bin})
+
+                name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich__binned.csv')
+                df_bin.to_csv(name_save, index=False)
 
                 # >>>  Plot results
 
@@ -225,8 +239,8 @@ class ImJoyPlugin():
                 ax[1][0].set_ylabel('Frequency')
                 ax[1][0].set_xlabel('Distance [pix]')
 
-                sns.lineplot(x="dist_orig", y="n_rna", data=new_df,ax=ax[1][1])
-                sns.lineplot(x="dist_orig", y="n_rna_movavg", data=new_df,ax=ax[1][1])
+                sns.lineplot(x="dist_orig", y="n_rna", data=df_results,ax=ax[1][1])
+                sns.lineplot(x="dist_bin", y="n_rna_bin", data=df_bin)
 
                 plt.tight_layout()
 
