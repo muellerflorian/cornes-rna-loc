@@ -5,9 +5,9 @@
  "version": "0.2.0",
  "plugins": [
   {
-   "name": "RNA-Axes-Enrichment",
+   "name": "CALC-Axes-Enrichment",
    "type": "native-python",
-   "version": "0.0.2",
+   "version": "0.0.3",
    "description": "Calculate expression levels around annotated axes.",
    "tags": "",
    "ui": [
@@ -28,7 +28,33 @@
     "pip: matplotlib scikit-image numpy pandas seaborn"
    ],
    "dependencies": [],
-   "uri": "imjoy-plugins\\RNA-Axes-Enrichment.imjoy.html"
+   "uri": "imjoy-plugins\\CALC-Axes-Enrichment.imjoy.html"
+  },
+  {
+   "name": "PLOT-Axes-Enrichment",
+   "type": "native-python",
+   "version": "0.0.1",
+   "description": "Plot axes enrichment for multiple data-sets.",
+   "tags": "",
+   "ui": [
+    "<span style='font-weight: 550; color:#666362'>Path RESULTS</span>: {id: 'path_results', type: 'string', placeholder: 'paste-path-to-data'}",
+    "<span style='font-weight: 550; color:#666362'>Path SAVE</span>: {id: 'path_save', type: 'string', placeholder: 'paste-path-to-save'}",
+    "<span style='font-weight: 550; color:#666362'>Data sets</span>: {id: 'data_sets', type: 'string', placeholder: 'WT,mutant'}",
+    "<span style='font-weight: 550; color:#666362'>Pixel-size</span>: {id: 'pixel_size', type: 'number', placeholder: 0.104}"
+   ],
+   "cover": "",
+   "inputs": null,
+   "outputs": null,
+   "flags": [],
+   "icon": "extension",
+   "api_version": "0.1.7",
+   "env": "",
+   "permissions": [],
+   "requirements": [
+    "pip: matplotlib scikit-image numpy pandas seaborn"
+   ],
+   "dependencies": [],
+   "uri": "imjoy-plugins\\PLOT-Axes-Enrichment.imjoy.html"
   }
  ],
  "collections": []

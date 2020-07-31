@@ -1,0 +1,140 @@
+﻿<docs lang="markdown">
+[TODO: write documentation for this plugin.]
+</docs>
+
+<config lang="json">
+{
+  "name": "PLOT-Axes-Enrichment",
+  "type": "native-python",
+  "version": "0.0.1",
+  "description": "Plot axes enrichment for multiple data-sets.",
+  "tags": "",
+  "ui": [ 
+            "<span style='font-weight: 550; color:#666362'>Path RESULTS</span>: {id: 'path_results', type: 'string', placeholder: 'paste-path-to-data'}" ,
+            "<span style='font-weight: 550; color:#666362'>Path SAVE</span>: {id: 'path_save', type: 'string', placeholder: 'paste-path-to-save'}",
+            "<span style='font-weight: 550; color:#666362'>Data sets</span>: {id: 'data_sets', type: 'string', placeholder: 'WT,mutant'}",
+            "<span style='font-weight: 550; color:#666362'>Pixel-size</span>: {id: 'pixel_size', type: 'number', placeholder: 0.104}"
+        ],
+  "cover": "",
+  "inputs": null,
+  "outputs": null,
+  "flags": [],
+  "icon": "extension",
+  "api_version": "0.1.7",
+  "env": "",
+  "permissions": [],
+  "requirements": ["pip: matplotlib scikit-image numpy pandas seaborn"],
+  "dependencies": []
+}
+</config>
+
+<script lang="python">
+from imjoy import api
+
+import asyncio
+import sys
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
+matplotlib.rcParams['font.sans-serif'] = "Arial"
+
+if sys.platform == "darwin":
+    import matplotlib
+    matplotlib.use('PS')
+
+class ImJoyPlugin():
+    def setup(self):
+        api.log('PLOT-Axes-Enrichment plugin initialized')
+
+    async def run(self, ctx):
+
+        # >>> CHECK INPUT PARAMETERS
+        api.log(ctx.config)
+
+        path_results_str = ctx.config.path_results
+        path_save_str = ctx.config.path_save
+
+        data_sets_str = ctx.config.data_sets
+        pixel_size = ctx.config.pixel_size
+
+        # Path containing data, and to save results
+        if path_results_str == 'paste-path-to-data':
+            api.alert('Path containing data to be processed has to be specified.')
+            return
+
+        path_results = Path(path_results_str)
+
+        # Path containing data, and to save results
+        if path_save_str == 'paste-path-to-save':
+            api.alert('Path containing data to be processed has to be specified.')
+            return
+
+        path_save = Path(path_save_str)
+
+        # Check data-sets
+        data_sets = tuple(x for x in data_sets_str.split(','))
+        
+
+        # >>> Loop over all results (files ending wiht __binned.csv)
+        df_list = []
+        for f_results in path_results.glob('*__binned.csv'):
+
+            api.log(f'\n\n>>> Processing file\n  {f_results}')
+
+            # Check which data-set file corresponds to
+            data_set = [substring for substring in data_sets if(substring in f_results.name)] 
+
+            if len(data_set) == 1:
+                df_loop = pd.read_csv(f_results)
+                df_loop['dist_bin_um'] = df_loop['dist_bin']*pixel_size
+                df_loop['file'] = f_results.name
+                df_loop['data_set'] = data_set[0]
+                df_list.append(df_loop)
+            else:
+                api.log(f'   !!! File could not be assigned to a data-set. {data_set}')
+
+        df_all = pd.concat(df_list)
+
+        # >>> CREATE PLOTS
+
+        # >>> Combined line-plots with mean +/- standard deviation
+        plt.figure(figsize=(5, 4))
+        ax = sns.lineplot(x="dist_bin_um", y="n_rna_bin", hue='data_set', data=df_all)
+        plt.xlabel('Distance from loop [um]', fontsize=14)
+        plt.ylabel('# of RNAs/bin', fontsize=14)
+        ax.tick_params(axis='both', which='major', labelsize=12)
+        plt.xlim(-50, 100)
+        plt.tight_layout()
+
+        plt.savefig(path_save / 'line_plots_ci.png', dpi=300)
+        plt.savefig(path_save / 'line_plots_ci.pdf')
+        plt.close()
+        name_save = str(path_save / 'line_plots_ci.pdf')
+        api.log(f'Plot saved here {name_save}')
+
+        # >>> Generate separate plot for each of the specified data-sets
+
+        for data_set in data_sets:
+
+            plt.figure(figsize=(5, 4))
+            ax = sns.lineplot(x="dist_bin_um", y="n_rna_bin",
+                            units="file", estimator=None,
+                            data=df_all.query("data_set == @data_set"))
+            plt.xlabel('Distance from loop [um]', fontsize=14)
+            plt.ylabel('# of RNAs/bin', fontsize=14)
+            ax.tick_params(axis='both', which='major', labelsize=12)
+            plt.xlim(-50, 100)
+            plt.tight_layout()
+
+            plt.savefig(path_save / f'line_plots__{data_set}.png', dpi=300)
+            plt.savefig(path_save / f'line_plots__{data_set}.pdf')
+            plt.close()
+
+api.export(ImJoyPlugin())
+</script>
