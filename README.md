@@ -1,3 +1,6 @@
+[![powered by ImJoy](https://imjoy.io/static/badge/powered-by-imjoy-badge.svg)](https://imjoy.io/)
+![GitHub](https://img.shields.io/github/license/muellerflorian/cornes-rna-loc)
+
 # RNA localization in c. elegans 
 Source code to analyse RNA localization in c. elegans. 
 
