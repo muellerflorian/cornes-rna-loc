@@ -5,13 +5,42 @@
  "version": "0.2.0",
  "plugins": [
   {
-   "name": "CALC-Axes-Enrichment",
+   "name": "CALC-axes-enrich-INT",
    "type": "native-python",
-   "version": "0.0.3",
-   "description": "Calculate expression levels around annotated axes.",
+   "version": "0.0.1",
+   "description": "Calculate intensity levels along annotated axes.",
    "tags": "",
    "ui": [
-    "<span style='font-weight: 550; color:#666362'>Path ANALYSIS</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
+    "<span style='font-weight: 550; color:#666362'>Path DATA</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
+    "<span style='font-weight: 550; color:#666362'>CH annotation</span>: {id: 'ch_annotation', type: 'string', placeholder: 'w2CY5'}",
+    "<span style='font-weight: 550; color:#666362'>CH image</span>: {id: 'ch_img', type: 'string', placeholder: 'w3cy3'}",
+    "<span style='font-weight: 550; color:#666362'>MAX distance</span>: {id: 'dist_max', type: 'number', placeholder: 100}",
+    "<span style='font-weight: 550; color:#666362'>N bin</span>: {id: 'bin_step', type: 'number', placeholder: 20}",
+    "<span style='font-weight: 550; color:#666362'>Int quantile</span>: {id: 'quantile_intensity', type: 'number', placeholder: 80}"
+   ],
+   "cover": "",
+   "inputs": null,
+   "outputs": null,
+   "flags": [],
+   "icon": "extension",
+   "api_version": "0.1.7",
+   "env": "",
+   "permissions": [],
+   "requirements": [
+    "pip: matplotlib scikit-image numpy pandas seaborn"
+   ],
+   "dependencies": [],
+   "uri": "imjoy-plugins\\CALC-axes-enrich-INT.imjoy.html"
+  },
+  {
+   "name": "CALC-axes-enrich-RNA",
+   "type": "native-python",
+   "version": "0.0.4",
+   "description": "Calculate RNA expression levels along annotated axes.",
+   "tags": "",
+   "ui": [
+    "<span style='font-weight: 550; color:#666362'>Path DATA</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
+    "<span style='font-weight: 550; color:#666362'>Suffix results</span>: {id: 'results_suffix', type: 'string', placeholder: ''}",
     "<span style='font-weight: 550; color:#666362'>Image size</span>: {id: 'image_size', type: 'string', placeholder: '1024,1024'}",
     "<span style='font-weight: 550; color:#666362'>MAX distance</span>: {id: 'dist_max', type: 'number', placeholder: 100}",
     "<span style='font-weight: 550; color:#666362'>N bin</span>: {id: 'bin_step', type: 'number', placeholder: 20}"
@@ -28,7 +57,7 @@
     "pip: matplotlib scikit-image numpy pandas seaborn"
    ],
    "dependencies": [],
-   "uri": "imjoy-plugins\\CALC-Axes-Enrichment.imjoy.html"
+   "uri": "imjoy-plugins\\CALC-axes-enrich-RNA.imjoy.html"
   },
   {
    "name": "PLOT-Axes-Enrichment",

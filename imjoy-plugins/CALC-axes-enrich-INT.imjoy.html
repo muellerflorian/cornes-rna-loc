@@ -4,16 +4,18 @@
 
 <config lang="json">
 {
-  "name": "CALC-Axes-Enrichment",
+  "name": "CALC-axes-enrich-INT",
   "type": "native-python",
-  "version": "0.0.3",
-  "description": "Calculate expression levels around annotated axes.",
+  "version": "0.0.1",
+  "description": "Calculate intensity levels along annotated axes.",
   "tags": "",
   "ui": [
-        "<span style='font-weight: 550; color:#666362'>Path ANALYSIS</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
-        "<span style='font-weight: 550; color:#666362'>Image size</span>: {id: 'image_size', type: 'string', placeholder: '1024,1024'}",
+        "<span style='font-weight: 550; color:#666362'>Path DATA</span>: {id: 'path_base', type: 'string', placeholder: 'paste-path-to-data'}",
+        "<span style='font-weight: 550; color:#666362'>CH annotation</span>: {id: 'ch_annotation', type: 'string', placeholder: 'w2CY5'}",
+        "<span style='font-weight: 550; color:#666362'>CH image</span>: {id: 'ch_img', type: 'string', placeholder: 'w3cy3'}",
         "<span style='font-weight: 550; color:#666362'>MAX distance</span>: {id: 'dist_max', type: 'number', placeholder: 100}",
-        "<span style='font-weight: 550; color:#666362'>N bin</span>: {id: 'bin_step', type: 'number', placeholder: 20}"
+        "<span style='font-weight: 550; color:#666362'>N bin</span>: {id: 'bin_step', type: 'number', placeholder: 20}",
+        "<span style='font-weight: 550; color:#666362'>Int quantile</span>: {id: 'quantile_intensity', type: 'number', placeholder: 80}"
         ],
   "cover": "",
   "inputs": null,
@@ -34,8 +36,6 @@ from imjoy import api
 import asyncio
 import sys
 
-import os
-
 import json
 from pathlib import Path
 import numpy as np
@@ -43,8 +43,8 @@ from scipy import ndimage
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from skimage.draw import polygon_perimeter
 from skimage import draw
+from skimage.io import imread
 
 
 if sys.platform == "darwin":
@@ -61,9 +61,12 @@ class ImJoyPlugin():
         api.log(ctx.config)
 
         path_base_str = ctx.config.path_base
-        image_size_str = ctx.config.image_size
+        ch_annotation = ctx.config.ch_annotation
+        ch_img = ctx.config.ch_img
+        quantile_intensity = ctx.config.quantile_intensity
         dist_max = ctx.config.dist_max
         bin_step = ctx.config.bin_step
+
 
         # Path containing data, and to save results
         if path_base_str == 'paste-path-to-data':
@@ -72,65 +75,61 @@ class ImJoyPlugin():
 
         path_base = Path(path_base_str)
 
-        # Check new size
-        if image_size_str.count(',') == 1:
-            image_size = tuple(int(x) for x in image_size_str.split(','))
-        else:
-            api.alert('String to define new size has to contain \",\" to separate the new dimensions in XY.')
-            return
-
         # >>> PROCESS FOLDERS
 
         # Different folders
-        path_json = path_base / 'axes_enrichment' / 'annotations'
-        path_spots = path_base / 'spot_detection'
+        path_annotations = path_base / 'analysis' / 'axes_enrichment' / 'annotations'
+        if not path_annotations.is_dir():
+            api.log('Folder with annotations does not exist: {path_annotations}')
+            
+        path_images = path_base / 'acquisition'
 
-        path_save = path_base / 'axes_enrichment' / 'results'
+        path_save = path_base / 'analysis' / 'axes_enrichment' / f'results__intensity_q{round(quantile_intensity)}'
         if not path_save.is_dir():
             path_save.mkdir(parents=True)
 
         # Loop over all spot detection results
-        for f_spots in path_spots.glob('*__spots.csv'):
+        for f_annotation in path_annotations.glob('*.json'):
 
-            api.showStatus(f'>>> Processing spot detection file {f_spots}. More details in log.')
-            name_spots = f_spots.name
+            api.showStatus(f'>>> Processing annotation {f_annotation}')
+            name_json = f_annotation.name
             
-            # Annnotation file
-            name_json = name_spots.replace('__spots.csv','.json')
-            name_json_full = (path_json / name_json).resolve()
-
-            if not name_json_full.is_file():
-                api.log(f'Annotation does not exist: {name_json_full}')
+            # >>> Load image
+            name_img = name_json.replace('.json','.tif').replace(ch_annotation,ch_img)
+            f_img = path_images / name_img
+            
+            if not f_img.is_file():
+                api.log(f'Image does not exist: {f_img}')
                 continue
-
-            with open(name_json_full, encoding='utf-8-sig') as fh:
+            
+            img_3d = imread(str(f_img))
+            img_2d = img_3d.max(axis=0)
+            image_size = img_2d.shape
+            
+            # >>> Process annnotation file    
+            with open(f_annotation, encoding='utf-8-sig') as fh:
+                
                 data_json = json.load(fh)
-
-                # Overwrite default file size if bounding box is present
-                if 'bbox' in data_json:
-                    image_size = (int(data_json['bbox'][2]-data_json['bbox'][0]+1),
-                                        int(data_json['bbox'][3]-data_json['bbox'][1]+1))
-                else:
-                    api.log('Image size not provided in geojson file.')
-
+                
                 # Loop over list and create simple dictionary & get size of annotations
                 n_features = len(data_json['features'])
                 if n_features != 1:
                     api.log(f'Annotation file CAN ONLY contain 1 annotation, not {n_features}.')
                     continue
-                
+
                 annot_type = data_json['features'][0]['geometry']['type']
                 if annot_type not in ['LineString']:
                     api.log(f'Annotation type {annot_type} not supported .')
                     continue            
-                
+
                 line = np.squeeze(np.asarray(data_json['features'][0]['geometry']['coordinates'])).astype('int')
-                
+
+                # Flip orientation of y axis
+                line[:,1] = image_size[1] -  line[:,1] - 1
 
                 # >>>>> Process annotation
 
                 # >> Loop over polygon coordinates and create closed line
-
                 rr_all =  np.empty([0], dtype=int)
                 cc_all = np.empty([0], dtype=int)
                 img_mask = np.zeros(image_size)
@@ -169,34 +168,32 @@ class ImJoyPlugin():
                 y_end = line_sampled[-1,1]
                 if y_end < y_start:
                     dist_orig = -1*dist_orig
+          
+                # >>> Intensities and index in annotation
+                int_in_annotation = img_2d[edt<dist_max]
+                inds_ax0_in_annotation = inds[0,edt<dist_max]
+                inds_ax1_in_annotation = inds[1,edt<dist_max]
+                inds_in_annotation = np.column_stack((inds_ax1_in_annotation,inds_ax0_in_annotation))
+                
+                unique_rows, unique_inverse = np.unique(inds_in_annotation, axis=0, return_inverse=True)
 
-
-                # >>>>  Read spot detection file
-                spots = pd.read_csv(f_spots, sep=',').to_numpy()
-
-                #  >> Get index of closest pixel on the line 
-                edt_spots = edt[spots[:,1], spots[:,2]]
-                ind_spots_keep = edt_spots <= dist_max
-
-                inds_spots_ax0 = inds[0,spots[:,1], spots[:,2]]
-                inds_spots_ax1 = inds[1,spots[:,1], spots[:,2]]
-                inds_spots = np.column_stack((inds_spots_ax1,inds_spots_ax0))
-
-                inds_spots = inds_spots[ind_spots_keep,:]
-
-                unique_rows, counters = np.unique(inds_spots, axis=0, return_counts=True)
-
+                # >>>> Intensity along line
+                int_line = np.zeros((unique_rows.shape[0]))
+                for index, unique_row in enumerate(unique_rows):     
+                    inds_match = np.where(np.all(inds_in_annotation==unique_row,axis=1))[0]
+                    int_line[index] = np.quantile(int_in_annotation[inds_match], quantile_intensity/100)
+                
                 # >>>>> Combine results in data-frame
                 df_line = pd.DataFrame(data=line_sampled,columns=["ax1", "ax2"])
                 df_line['dist_orig'] = dist_orig
-                df_spots = pd.DataFrame(data=unique_rows,columns=["ax1", "ax2"])
-                df_spots['n_rna'] = counters
-
+                df_intensity = pd.DataFrame(data=unique_rows,columns=["ax1", "ax2"])
+                df_intensity['int'] = int_line   
+                    
                 # >> Merge the data frames & save
-                df_results = pd.merge(df_line, df_spots,  how='left', left_on=['ax1','ax2'], right_on = ['ax1','ax2'])
-                df_results["n_rna"] = df_results["n_rna"].fillna(0)
- 
-                name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich.csv')
+                df_results = pd.merge(df_line, df_intensity,  how='left', left_on=['ax1','ax2'], right_on = ['ax1','ax2'])
+                df_results["int"] = df_results["int"].fillna(0)    
+                    
+                name_save = path_save / name_json.replace('.json','__axes_enrich_int.csv')
                 df_results.to_csv(name_save, index=False)
 
                 # >>>> Binning of data
@@ -208,14 +205,14 @@ class ImJoyPlugin():
                 digitized = np.digitize(df_results['dist_orig'], dist_bin)
 
                 # Sum RNA counts for each bin
-                n_rna_bin = [df_results['n_rna'][digitized == i].sum() for i in range(1, len(dist_bin))]
+                int_bin = [df_results['int'][digitized == i].median() for i in range(1, len(dist_bin))]
 
                 df_bin = pd.DataFrame({'dist_bin': dist_bin[0:-1],
-                                    'n_rna_bin': n_rna_bin})
+                                      'int_bin': int_bin})
 
-                name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich__binned.csv')
-                df_bin.to_csv(name_save, index=False)
-
+                name_save = path_save / name_json.replace('.json','__axes_enrich_int__binned.csv')
+                df_bin.to_csv(name_save, index=False)            
+                
                 # >>>  Plot results
 
                 fig, ax = plt.subplots(2, 2)
@@ -226,29 +223,22 @@ class ImJoyPlugin():
                 ax[0][0].get_yaxis().set_visible(False)
                 ax[0][0].set_title('Axes and distance from axes')
                 ax[0][0].plot(line[:,0], line[:,1], color='b')
-
+                
+                ax[0][1].imshow(img_2d,cmap="hot")
+                ax[0][1].get_xaxis().set_visible(False)
+                ax[0][1].get_yaxis().set_visible(False)
+                ax[0][1].set_title('Axes and distance from axes')
                 ax[0][1].plot(line[:,0], line[:,1], color='b')
-                ax[0][1].set_title('Spots (green-kept, red-removed)')
-                ax[0][1].scatter(spots[ind_spots_keep,2], spots[ind_spots_keep,1], color='g', s=1)
-                ax[0][1].scatter(spots[np.logical_not(ind_spots_keep),2], spots[np.logical_not(ind_spots_keep),1], color='r', s=1)
-                ax[0][1].invert_yaxis()
-                ax[0][1].set_aspect('equal', 'box')
 
-                ax[1][0].hist(edt_spots, 50, density=True, facecolor='g', alpha=0.75)
-                ax[1][0].set_title('Hist of distance from axis')
-                ax[1][0].set_ylabel('Frequency')
-                ax[1][0].set_xlabel('Distance [pix]')
 
-                sns.lineplot(x="dist_orig", y="n_rna", data=df_results,ax=ax[1][1])
-                sns.lineplot(x="dist_bin", y="n_rna_bin", data=df_bin)
+                sns.lineplot(x="dist_orig", y="int", data=df_results,ax=ax[1][0])
+                sns.lineplot(x="dist_bin", y="int_bin", data=df_bin,ax=ax[1][1])
 
                 plt.tight_layout()
 
-                name_save = path_save / name_spots.replace('__spots.csv','__axes_enrich.png')
+                name_save = path_save / name_json.replace('.json','__axes_enrich_int.png')
                 plt.savefig(name_save,dpi=300)
                 plt.close()
-
-
 
 api.export(ImJoyPlugin())
 </script>
